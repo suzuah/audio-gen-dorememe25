@@ -1,15 +1,20 @@
-import os, random
+import re, os, random
 from pathlib import Path
 import torch
 import pretty_midi
+
+from features_to_prefix import read_csv_strict, build_prefix_tokens, session_to_prefix
 from load_model import load_model
 from generate import generate_until_seconds, tokens_to_midi
-from midi2wav import midi_to_wav
+from midi_to_wav import midi_to_wav
 from musicgen_melody import init_musicgen, prefix_to_text, stylize_melody
 
 DATA_JSONL = "./data/melody_tok.jsonl"
 VOCAB_JSON = "./data/melody_voc.json"
-CKPT_PATH  = "./runs/melModel_tf.pt"
+CKPT_PATH  = "./ckpt/melModel_tf.pt"
+
+INPUT_CSV = "./data/sample2.csv"
+TARGET_RAW_IDX = 0
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SEED = 42
@@ -51,27 +56,57 @@ def generate(prefix_tokens, target_sec=20.0, temperature=1.0, top_p=0.95):
     )
     return toks
 
+def get_run_dir(base_dir: str = "./runs") -> Path:
+    base = Path(base_dir)
+    base.mkdir(parents=True, exist_ok=True)
+
+    run_nums = []
+    for child in base.iterdir():
+        if child.is_dir():
+            m = re.fullmatch(r"(\d+)", child.name)
+            if m:
+                run_nums.append(int(m.group(1)))
+
+    next_idx = (max(run_nums) + 1) if run_nums else 1
+    run_dir = base / str(next_idx)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 if __name__ == "__main__":
-    prefix = ["KEY_7", "MODE_MAJ", "BPM_120", "REG_MID", "RHY_2", "DENS_1", "CHR_1", "BAR", "POS_0"]
+    df = read_csv_strict(INPUT_CSV)
+    features = session_to_prefix(df)
+    prefix = build_prefix_tokens(features)
+
+    print("========== GENERATED PREFIX TOKENS ==========")
+    print(prefix)
+    print("=============================================")
 
     toks = generate(prefix)
-    out_midi = Path("./runs/melsamp3.mid")
-    base_wav = Path("./runs/melsamp3.wav")
-    out_midi.parent.mkdir(parents=True, exist_ok=True)
-    base_wav.parent.mkdir(parents=True, exist_ok=True)
 
-    sf2 = os.path.join(os.path.dirname(pretty_midi.__file__), "TimGM6mb.sf2")
+    runs_dir = get_run_dir("./runs")
+
+    out_midi = runs_dir / f"melody.mid"
+    base_wav = runs_dir / f"melody.wav"
+    final_wav = runs_dir / f"final.wav"
+
+    # Melody MIDI
     tokens_to_midi(toks, str(out_midi))
+
+    # Melody WAV
+    sf2 = os.path.join(os.path.dirname(pretty_midi.__file__), "TimGM6mb.sf2")
     midi_to_wav(str(out_midi), str(base_wav), sf2)
 
-    print("MIDI saved:", out_midi)
-    print("WAV saved:", base_wav)
+    print("Melody(MIDI) saved:", out_midi)
+    print("Melody(WAV) saved:", base_wav)
 
     init_musicgen(device=DEVICE, use_fp16=True)
     prompt = prefix_to_text(prefix)
-    print("Prompt:", prompt)
 
-    final_wav = Path("./runs/samp3.wav")
+    print("========== PROMPT FOR MUSICGEN ==========")
+    print(prompt)
+    print("=============================================")
+
     stylize_melody(
         melody_wav_path=str(base_wav),
         out_wav_path=str(final_wav),
@@ -84,3 +119,4 @@ if __name__ == "__main__":
         max_new_tokens=512
     )
     print("FINAL saved:", final_wav)
+    print("Done.")
