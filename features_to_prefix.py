@@ -6,6 +6,20 @@ import math
 def read_csv_strict(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
+def get_season(df):
+    season_col = None
+    for c in df.columns:
+        if c.strip().lower() == "season":
+            season_col = c
+            break
+    if season_col is None or len(df) == 0:
+        return None
+    
+    val = str(df.iloc[0][season_col]).strip().lower()
+    if not val:
+        return None
+    return val if val in {"spring", "summer", "autumn", "winter"} else None
+
 def build_prefix_tokens(feat: Dict[str, object]) -> List[str]:
     tokens = [
         f"KEY_{feat['key_idx']}",
@@ -26,25 +40,9 @@ def build_prefix_tokens(feat: Dict[str, object]) -> List[str]:
             if t.startswith(o):
                 ordered.append(t)
                 break
-
     return ordered
 
-_KEYS = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
-_KEY2IDX = {k:i for i,k in enumerate(_KEYS)}
-
-def _classify_color_5(r: int, g: int, b: int) -> str:
-    mx = max(r, g, b); mn = min(r, g, b)
-    if mx > 220 and (mx - mn) < 15: return "white"
-    if r >= g and r >= b:
-        if r > 180 and g > 180 and b < 120: return "yellow"
-        return "red"
-    if g >= r and g >= b: return "green"
-    return "blue"
-
-_BPM_MAP = {"red": 120, "yellow": 100, "green": 100, "blue": 80, "white": 60}
-_COLOR_KEY = {"red": "C", "yellow":"D#", "green":"F", "blue":"G#", "white":"A#"}
-
-def session_to_prefix(df: pd.DataFrame) -> Dict[str, object]:
+def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
     df_sorted = df.sort_values("StrokeIndex")
 
     first = df_sorted.iloc[0]
@@ -74,21 +72,48 @@ def session_to_prefix(df: pd.DataFrame) -> Dict[str, object]:
         g_i = int(round(g_val))
         b_i = int(round(b_val))
 
-    warm = (r_i >= g_i and r_i >= b_i)
-    cool = (b_i >= r_i and b_i >= g_i)
-    mode_major = not (cool and not warm)
+    # KEY
+    r = r_i / 255.0
+    g = g_i / 255.0
+    b = b_i / 255.0
+    yb = (r + g) / 2.0 - b
+    rg = r - g 
+    angle = math.atan2(rg, yb) # opponent color space
+    if angle < 0:
+        angle += 2 * math.pi
+    sector = int(round(angle / (2 * math.pi / 12))) % 12
+    KEY_NAMES = ["D","A","E","B","F#","C#","G#","D#","A#","F","C","G"] # 
+    key_name = KEY_NAMES[sector]
+    _KEYS = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
+    _KEY2IDX = {k:i for i,k in enumerate(_KEYS)}
+    key = _KEY2IDX[key_name]
 
-    """
-    instability = float(undo_total)
-    p_minor = 1.0 / (1.0 + math.exp(-instability))
-    mode_major = (p_minor < 0.5)
-    """
+    # MODE
+    if season in {"spring", "summer"}:
+        mode_major = True
+    else:
+        mode_major = False
 
+    # BPM
+    brightness = 0.299 * r_i + 0.587 * g_i + 0.114 * b_i # Luma, 표준 밝기 계산식
+    brightness_norm = (brightness - 30) / (230 - 30) # normalization
+    brightness_norm = max(0.0, min(1.0, brightness_norm)) # clamp
+    if brightness_norm < 0.2:
+        bpm = 60
+    elif brightness_norm < 0.4:
+        bpm = 80
+    elif brightness_norm < 0.6:
+        bpm = 100
+    elif brightness_norm < 0.8:
+        bpm = 120
+    else:
+        bpm = 140
+
+    # REG
     dx = end_x - start_x
     dy = end_y - start_y
     dz = end_z - start_z
-    D = (dx*dx + dy*dy + dz*dz) ** 0.5
-
+    D = math.sqrt(dx*dx + dy*dy + dz*dz) # distance(3D)
     norm_D = D / (1.0 + D)
     if norm_D < (1.0/3.0):
         reg = "REG_LOW"
@@ -97,31 +122,40 @@ def session_to_prefix(df: pd.DataFrame) -> Dict[str, object]:
     else:
         reg = "REG_HIGH"
 
+    # RHY
+    undo_total = float(last.get("TotalUndoCount", 0.0))
     stroke_count = len(df_sorted)
-    complexity_score = stroke_count * D
-    score = math.log1p(complexity_score)
-    edge_density = score / (1.0 + score)
+    actions = undo_total + stroke_count
+    if actions <= 0:
+        ratio = 0.0
+    else:
+        ratio = undo_total / actions # 전체 actions 중 undo 비율
+    rhy = int(round(2.0 * ratio))
+    rhy = max(0, min(2, rhy))
 
-    dens = int(round(edge_density * 2))
-    if dens < 0: dens = 0
-    if dens < 2: dens = 2
+    # DENS
+    THIN  = 30.0
+    THICK = 70.0
+    if "BrushSize" in df_sorted.columns:
+        brush_size = float(df_sorted.iloc[-1]["BrushSize"])
+        if brush_size < THIN:
+            dens = 0
+        elif brush_size < THICK:
+            dens = 1
+        else:
+            dens = 2
 
-    # edge_density = float(last["BrushSize"])
-
-    undo_total = float(last["TotalUndoCount"])
-    rhy = int(round(undo_total))
-    if rhy < 0: rhy = 0
-    if rhy < 2: rhy = 2
-
-    chroma_value = (max(r_i,g_i,b_i)/255.0) - (min(r_i,g_i,b_i)/255.0)
-    chr = int(round(chroma_value))
-    if chr < 0: chr = 0
-    if chr < 2: chr = 2
-
-    color_name = _classify_color_5(r_i, g_i, b_i)
-    key_name = _COLOR_KEY[color_name]
-    key = _KEY2IDX[key_name]
-    bpm = _BPM_MAP[color_name]
+    # CHR
+    TRANSPARENT = 0.35
+    OPAQUE =  0.65
+    if "ColorA" in df_sorted.columns:
+        alpha = float(df_sorted["ColorA"].median())
+        if alpha < TRANSPARENT:
+            chr = 0
+        elif alpha > OPAQUE:
+            chr = 2
+        else:
+            chr = 1   
 
     pos = 0
 

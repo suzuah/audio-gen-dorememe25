@@ -23,7 +23,7 @@ def init_musicgen(device: str | None = None, use_fp16: bool = True):
         ).to(device)
         MODEL.eval()
 
-def prefix_to_text(prefix, include_tokens=False):
+def prefix_to_text(prefix, include_tokens=False, season=None):
     """
     prefix: ["KEY_7","MODE_MAJ","BPM_120","REG_MID","RHY_2","DENS_2","CHR_1"]
     returns: natural-language prompt string for MusicGen
@@ -61,15 +61,15 @@ def prefix_to_text(prefix, include_tokens=False):
 
     # REG
     reg = d.get("REG", "MID")
-    reg_map = {"LOW": "lower register", "MID": "middle register", "HIGH": "upper register"}
-    reg_txt = reg_map.get(reg, "middle register")
+    reg_map = {"LOW": "lower register", "MID": "mid register", "HIGH": "high register"}
+    reg_txt = reg_map.get(reg, "mid register")
 
     # RHY
     try:
         rhy = max(0, min(2, int(d.get("RHY", 1))))
     except ValueError:
         rhy = 1
-    rhy_map = ["straight rhythm", "moderate syncopation", "strong syncopation"]
+    rhy_map = ["straight feel", "light syncopation", "strong syncopation"]
     rhy_txt = rhy_map[rhy]
 
     # DENS
@@ -77,7 +77,7 @@ def prefix_to_text(prefix, include_tokens=False):
         dens = max(0, min(2, int(d.get("DENS", 1))))
     except ValueError:
         dens = 1
-    dens_map = ["sparse note density", "moderate note density", "busy note density"]
+    dens_map = ["few notes, more space", "moderate note density", "many notes, constant motion"]
     dens_txt = dens_map[dens]
 
     # CHR
@@ -85,22 +85,38 @@ def prefix_to_text(prefix, include_tokens=False):
         ch = max(0, min(2, int(d.get("CHR", 1))))
     except ValueError:
         ch = 1
-    chr_map = ["minimal chromatic motion", "moderate chromatic motion", "pronounced chromatic motion"]
+    chr_map = ["mostly diatonic lines", "some chromatic passing tones", "frequent chromatic runs"]
     chr_txt = chr_map[ch]
 
-    # 최종 문장
-    parts = (
-        f"solo piano melody",
-        f"key: {key_name} {mode_name}",
-        f"tempo: {bpm} BPM",
-        f"register: {reg_txt}",
-        f"rhythm: {rhy_txt}",
-        f"density: {dens_txt}",
-        f"melodic movement: {chr_txt}",
-        "melody-forward, avoid heavy accompaniment",
-    )
+    # Season
+    season_txt = None
+    if isinstance(season, str):
+        s = season.strip().lower()
+        season_map = {
+            "spring": "music suited for spring-like, bright and airy mood",
+            "summer": "music suited for summer-like, vibrant and open mood",
+            "autumn": "music suited for autumn-like, warm and mellow mood",
+            "winter": "music suited for winter-like, calm and crystalline mood"
+        }
+        season_txt = season_map.get(s)
 
-    base = "; ".join(parts)
+    # 최종 문장
+    parts = [
+        f"solo piano",
+        f"{key_name} {mode_name}",
+        f"{bpm} bpm",
+        f"{reg_txt}",
+        f"{rhy_txt}",
+        f"{dens_txt}",
+        f"{chr_txt}",
+        "melody-forward",
+        "no vocals",
+        "avoid heavy accompaniment",
+    ]
+    if season_txt:
+        parts.append(season_txt)
+
+    base = ", ".join(parts)
 
     if include_tokens:
         tok = " ".join([
@@ -112,7 +128,9 @@ def prefix_to_text(prefix, include_tokens=False):
             f"DENS_{dens}",
             f"CHR_{ch}"
         ])
-        base = f"{base} (tokens: {tok})"
+        if isinstance (season, str) and season.strip():
+            tok += f"SEASON_{season.strip().upper()}"
+        print(f"(tokens: {tok})")
 
     return base
 
