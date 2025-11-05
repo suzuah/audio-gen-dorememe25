@@ -76,13 +76,13 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
     r = r_i / 255.0
     g = g_i / 255.0
     b = b_i / 255.0
-    yb = (r + g) / 2.0 - b
-    rg = r - g 
+    yb = (r + g) / 2.0 - b # yellow - blue
+    rg = r - g
     angle = math.atan2(rg, yb) # opponent color space
     if angle < 0:
         angle += 2 * math.pi
     sector = int(round(angle / (2 * math.pi / 12))) % 12
-    KEY_NAMES = ["D","A","E","B","F#","C#","G#","D#","A#","F","C","G"] # 
+    KEY_NAMES = ["D","A","E","B","F#","C#","G#","D#","A#","F","C","G"] # 스크랴 빈이 색-KEY
     key_name = KEY_NAMES[sector]
     _KEYS = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
     _KEY2IDX = {k:i for i,k in enumerate(_KEYS)}
@@ -134,10 +134,10 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
     rhy = max(0, min(2, rhy))
 
     # DENS
-    THIN  = 30.0
-    THICK = 70.0
+    THIN  = 0.30
+    THICK = 0.70
     if "BrushSize" in df_sorted.columns:
-        brush_size = float(df_sorted.iloc[-1]["BrushSize"])
+        brush_size = float(df_sorted.iloc[-1]["BrushSize"]) # 보류
         if brush_size < THIN:
             dens = 0
         elif brush_size < THICK:
@@ -146,8 +146,8 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
             dens = 2
 
     # CHR
-    TRANSPARENT = 0.35
-    OPAQUE =  0.65
+    TRANSPARENT = 0.40
+    OPAQUE = 0.60
     if "ColorA" in df_sorted.columns:
         alpha = float(df_sorted["ColorA"].median())
         if alpha < TRANSPARENT:
@@ -155,7 +155,7 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
         elif alpha > OPAQUE:
             chr = 2
         else:
-            chr = 1   
+            chr = 1
 
     pos = 0
 

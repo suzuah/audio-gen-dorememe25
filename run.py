@@ -42,7 +42,7 @@ cfg = Cfg()
 model, dataset = load_model(CKPT_PATH, DATA_JSONL, VOCAB_JSON, cfg, DEVICE)
 
 # Generate melody by prefix
-def generate(prefix_tokens, target_sec=20.0, temperature=1.0, top_p=0.95):
+def generate(prefix_tokens, target_sec=40.0, temperature=1.0, top_p=0.95):
     g = torch.Generator(device=DEVICE).manual_seed(SEED)
 
     toks = generate_until_seconds(
