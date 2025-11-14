@@ -13,7 +13,7 @@ DATA_JSONL = "./data/melody_tok.jsonl"
 VOCAB_JSON = "./data/melody_voc.json"
 CKPT_PATH  = "./ckpt/melModel_tf.pt"
 
-INPUT_CSV = "./data/sample2.csv"
+INPUT_CSV = "./data/sample.csv"
 TARGET_RAW_IDX = 0
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     print("Melody(WAV) saved:", base_wav)
 
     init_musicgen(device=DEVICE, use_fp16=True)
-    prompt = prefix_to_text(prefix, include_tokens=True, season=season)
+    prompt = prefix_to_text(prefix, include_tokens=True, season=season, variety=True)
 
     print("========== PROMPT FOR MUSICGEN ==========")
     print(prompt)
@@ -119,9 +119,11 @@ if __name__ == "__main__":
         device=DEVICE,
         use_fp16=True,
         do_sample=True,
-        temperature=1.05,
-        top_p=0.95,
-        max_new_tokens=512
+        temperature=1.1,
+        top_k=250,
+        top_p=0.92,
+        guidance_scale=4.0,
+        max_new_tokens=700
     )
     print("FINAL saved:", final_wav)
     print("Done.")
