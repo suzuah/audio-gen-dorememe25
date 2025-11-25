@@ -71,11 +71,14 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
     )
     a_i = float(df.loc[mask, "ColorA"].astype(float).median())
 
+    alpha_series = None
+    brush_series = None
+
     if "ColorA" in df_sorted.columns:
-        alpha_series = df_sorted["ColorA"].astype(float).clip(0, 1)
+        alpha_series = df_sorted["ColorA"].astype(float)
 
     if "BrushSize" in df_sorted.columns:
-        brush_series = df_sorted["BrushSize"].astype(float).clip(0, 1)
+        brush_series = df_sorted["BrushSize"].astype(float)
 
     # KEY
     _KEYS = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
@@ -85,7 +88,7 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
         (1.0, 0.9216, 0.0157): "D", # yellow
         (0.0, 1.0, 0.0): "A", # green
         (0.0, 1.0, 1.0): "E", # cyan
-        (0.0, 0.0, 1.0): "G", # blue
+        (0.0, 0.0, 1.0): "B", # blue
     } # Scriabin Key
     eps = 1e-4
     base = None
@@ -94,7 +97,10 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
         if abs(r_i - tr) <= eps and abs(g_i - tg) <= eps and abs(b_i - tb) <= eps:
             base = k
             break
-    offset = int(round(a_i * 4)) - 2
+    if base is None:
+        base = "C"
+
+    offset = int(round(a_i * 4)) - 2 # -2 ~ +2
     idx = (_KEY2IDX[base] + offset) % 12
     key_name = _KEYS[idx]
     key = idx
@@ -133,25 +139,46 @@ def session_to_features(df: pd.DataFrame, season: str) -> Dict[str, object]:
     rhy = max(0, min(2, rhy))
 
     # DENS
-    THIN  = 0.35
-    THICK = 0.65
+    BRUSH_MIN  = 0.001
+    BRUSH_MAX = 0.05
+    dens = 1
     if "BrushSize" in df_sorted.columns:
         if len(brush_series):
-            bins = np.linspace(0, 1, 11) # edges
-            hist, edges = np.histogram(brush_series, bins=bins)
-            k = int(hist.argmax())
-            bs = float((edges[k] + edges[k+1]) / 2.0)
+            bs_min = float(brush_series.min())
+            bs_max = float(brush_series.max())
+            if bs_min == bs_max:
+                bs = bs_min
+            else:
+                bins = np.linspace(BRUSH_MIN, BRUSH_MAX, 11) # edges
+                hist, edges = np.histogram(brush_series, bins=bins)
+                k = int(hist.argmax())
+                bs = float((edges[k] + edges[k+1]) / 2.0)
+                
+            bs = max(BRUSH_MIN, min(BRUSH_MAX, bs))
+            norm_bs = (bs - BRUSH_MIN) / (BRUSH_MAX - BRUSH_MIN)
+            norm_bs = max(0.0, min(1.0, norm_bs))
+            
+            if norm_bs < (1.0/3.0):
+                dens = 0
+            elif norm_bs < (2.0/3.0):
+                dens = 1
+            else:
+                dens = 2
         else:
-            bs = 0.5
-        dens = 0 if bs < THIN else (1 if bs < THICK else 2)
+            dens = 1
 
     # CHR
-    TRANSPARENT = 0.35
-    OPAQUE = 0.65
+    chro = 1
     if (brush_series is not None) and (alpha_series is not None) and len(brush_series) and len(alpha_series):
         idx_max = brush_series.idxmax()
         a = float(alpha_series.loc[idx_max])
-    chro = 0 if a < TRANSPARENT else (2 if a > OPAQUE else 1)
+        a = max(0.0, min(1.0, a))
+        if a < (1.0/3.0):
+            chro = 0
+        elif a < (2.0/3.0):
+            chro = 1
+        else:
+            chro = 2
 
     pos = 0
 
